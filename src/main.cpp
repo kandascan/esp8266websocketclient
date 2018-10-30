@@ -9,8 +9,8 @@
 ESP8266WiFiMulti WiFiMulti;
 WebSocketsClient webSocket;
 
-#define ssid "HWDP"
-#define pass "amicaamica"
+#define ssid "INEA-B16F"
+#define pass "5554874968"
 #define host "korest.herokuapp.com"
 #define port 80
 #define USE_SERIAL Serial
