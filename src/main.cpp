@@ -9,22 +9,27 @@
 ESP8266WiFiMulti WiFiMulti;
 WebSocketsClient webSocket;
 
+#define LED_BUILTIN 2
 #define ssid "INEA-B16F"
 #define pass "5554874968"
+//#define host "192.168.8.107"
+//#define port 3000
 #define host "korest.herokuapp.com"
 #define port 80
 #define USE_SERIAL Serial
 #define MESSAGE_INTERVAL 2000
 #define DHTPIN 5
 #define DHTTYPE DHT22   // DHT 22  (AM2302), AM2321
-#define LED 2
 DHT dht(DHTPIN, DHTTYPE);
 //#define HEARTBEAT_INTERVAL 25000
 
 uint64_t messageTimestamp = 0;
 uint64_t heartbeatTimestamp = 0;
 bool isConnected = false;
-bool ledStatus = !false;
+bool LEDStatus;
+bool resultLed;
+
+static void writeLED(bool);
 
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
     switch(type) {
@@ -42,26 +47,27 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
             }
             break;
         case WStype_TEXT:
-          {
-            USE_SERIAL.printf("[WSc] get text: %s\n", payload);
-            //digitalWrite(LED, ledStatus);
-            //ledStatus = !ledStatus;
-            /*
-            String text = ((const char *)&payload[0]);
-            int pos = text.indexOf('{');
-            String json = text.substring(pos,text.length()-1);
+        {
+          USE_SERIAL.printf("[WSc] get text: %s\n", payload);
 
-        const size_t BUFFER_SIZE =
-             JSON_OBJECT_SIZE(10)
-             + 200;
-         DynamicJsonBuffer jsonBuffer(BUFFER_SIZE);
-
-         JsonObject& root = jsonBuffer.parseObject(json);
-         String msg = root["Ledi"];
-         */
-         //USE_SERIAL.printf("Ledi: %s\n", msg);
+          String text = ((const char *)&payload[0]);
+          int pos = text.indexOf('{');
+          String json = text.substring(pos,text.length()-1);
+          StaticJsonBuffer<200> jsonBuffer;
+          JsonObject& root = jsonBuffer.parseObject(json);
+          bool hasKey = root.containsKey("Ledi");
+          if(hasKey){
+            resultLed = root["Ledi"];
+          }
+          //Serial.printf("Dioda led: %s", resultLed ? "true" : "false");
+          if(resultLed){
+            writeLED(true);
+          }
+          else{
+            writeLED(false);
           }
             break;
+          }
         case WStype_BIN:
             USE_SERIAL.printf("[WSc] get binary length: %u\n", length);
             hexdump(payload, length);
@@ -72,7 +78,26 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
     }
 }
 
-void CreateJsonPayload(String &jsonString, float h, float t, float f, float hif, float hic, bool ledStat)
+static void writeLED(bool LEDon)
+{
+  if (LEDon) {
+    digitalWrite(LED_BUILTIN, LOW);
+  }
+  else {
+    digitalWrite(LED_BUILTIN, HIGH);
+  }
+}
+
+void CreateJsonPayloadLed(String &jsonString, bool resultLed){
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& root = jsonBuffer.createObject();
+  root["Ledii"] = resultLed;
+  String buffer;
+  root.printTo(buffer);
+  jsonString = "42[\"led\","+buffer+"]";
+}
+
+void CreateJsonPayload(String &jsonString, float h, float t, float f, float hif, float hic, bool resultLed)
 {
   String hum = String(h) + "%";
   String temp = String(t) + " *C " + String(f) + " *F";
@@ -82,15 +107,15 @@ void CreateJsonPayload(String &jsonString, float h, float t, float f, float hif,
   root["Humidity"] = hum;
   root["Temperature"] = temp;
   root["Heat index"] = heatIndex;
-  root["Led"] = ledStat;
+  root["Led"] = resultLed;
   String buffer;
   root.printTo(buffer);
   jsonString = "42[\"tempSensor\","+buffer+"]";
 }
 
 void setup() {
-    pinMode(LED, OUTPUT);
-    digitalWrite(LED, ledStatus);
+    pinMode(LED_BUILTIN, OUTPUT);
+    writeLED(false);
     // USE_SERIAL.begin(921600);
     USE_SERIAL.begin(9600);
     //Serial.setDebugOutput(true);
@@ -119,6 +144,13 @@ void setup() {
 void loop() {
     webSocket.loop();
     if(isConnected) {
+      if(LEDStatus != resultLed){
+        String jsonStringLed;
+        CreateJsonPayloadLed(jsonStringLed, resultLed);
+        // example socket.io message with type "messageType" and JSON payload
+        webSocket.sendTXT(jsonStringLed);
+        LEDStatus = resultLed;
+      }
         uint64_t now = millis();
         if(now - messageTimestamp > MESSAGE_INTERVAL) {
             messageTimestamp = now;
@@ -138,9 +170,8 @@ void loop() {
               float hif = dht.computeHeatIndex(f, h);
               // Compute heat index in Celsius (isFahreheit = false)
               float hic = dht.computeHeatIndex(t, h, false);
-
               String jsonString;
-              CreateJsonPayload(jsonString, h, t, f, hif, hic, ledStatus);
+              CreateJsonPayload(jsonString, h, t, f, hif, hic, resultLed);
               // example socket.io message with type "messageType" and JSON payload
               webSocket.sendTXT(jsonString);
             }
